@@ -1,3 +1,5 @@
 *.ipynb
 runs*/
 models/
+dataset*
+__pycache__/

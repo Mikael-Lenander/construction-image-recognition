@@ -5,17 +5,18 @@ from torch.optim import Adam
 from torch.utils.data import DataLoader, WeightedRandomSampler
 from torchvision.transforms import v2
 from torchvision.models import get_model
-from torchvision.datasets import ImageFolder, folder
+from torchvision.datasets import DatasetFolder
 from torchmetrics import Accuracy
 from pathlib import Path
 import os
-from typing import Union, Optional, Callable, Any
+from typing import Union, Optional, Callable
 from collections import Counter
 from argparse import ArgumentParser
 
 DATASETS_PATH = Path(os.getcwd())
 LOG_BASEDIR = Path("runs")
 MODELS_BASEDIR = Path("models")
+DATASET_NAME = "dataset-processed"
 EPOCHS = 50
 
 SEED = 42
@@ -28,18 +29,24 @@ AUGMENTATION_AUTO, AUGMENTATION_CUSTOM, AUGMENTATION_NONE = "auto", "custom", "n
 CONVNEXT_TINY, CONVNEXT_SMALL, CONVNEXT_BASE, CONVNEXT_LARGE = "convnext_tiny", "convnext_small", "convnext_base", "convnext_large"
 CLASSES = ("gravel", "asphalt", "excavation", "sewer-pipe", "cabels", "geotextile")
 
-class SelectiveImageFolder(ImageFolder):
+class SelectiveTensorFolder(DatasetFolder):
     def __init__(
         self,
         root: str,
         transform: Optional[Callable] = None,
         target_transform: Optional[Callable] = None,
-        loader: Callable[[str], Any] = folder.default_loader,
         is_valid_file: Optional[Callable[[str], bool]] = None,
         classes: Optional[list[str]] = None,
     ):
         self.classes = classes
-        super().__init__(root, transform, target_transform, loader, is_valid_file)
+        super().__init__(
+            root,
+            torch.load,
+            ('.pt',),
+            transform,
+            target_transform,
+            is_valid_file,
+        )
 
     def find_classes(self, directory: Union[str, Path]) -> tuple[list[str], dict[str, int]]:
         classes, class_to_idx = super().find_classes(directory)
@@ -50,38 +57,7 @@ class SelectiveImageFolder(ImageFolder):
         return classes, class_to_idx
 
 
-def get_transforms(augmentation_type, model_size):
-    preprocesses = {
-        CONVNEXT_TINY: [
-            v2.Resize((236, 236), interpolation=v2.InterpolationMode.BILINEAR),
-            v2.CenterCrop(224),
-            v2.ToImage(),
-            v2.ToDtype(torch.float32, scale=True),
-            v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-        ],
-        CONVNEXT_SMALL: [
-            v2.Resize((230, 230), interpolation=v2.InterpolationMode.BILINEAR),
-            v2.CenterCrop(224),
-            v2.ToImage(),
-            v2.ToDtype(torch.float32, scale=True),
-            v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-        ],
-        CONVNEXT_BASE: [
-            v2.Resize((232, 232), interpolation=v2.InterpolationMode.BILINEAR),
-            v2.CenterCrop(224),
-            v2.ToImage(),
-            v2.ToDtype(torch.float32, scale=True),
-            v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-        ],
-        CONVNEXT_LARGE: [
-            v2.Resize((232, 232), interpolation=v2.InterpolationMode.BILINEAR),
-            v2.CenterCrop(224),
-            v2.ToImage(),
-            v2.ToDtype(torch.float32, scale=True),
-            v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-        ],
-    }
-    preprocess = preprocesses[model_size]
+def get_augmentations(augmentation_type):
     augmentations = {
         AUGMENTATION_AUTO: v2.TrivialAugmentWide(),
         AUGMENTATION_CUSTOM: v2.RandomApply(
@@ -111,18 +87,16 @@ def get_transforms(augmentation_type, model_size):
             ),
             p=0.5,
         ),
+        AUGMENTATION_NONE: nn.Identity(),
     }
-    if augmentation_type == AUGMENTATION_NONE:
-        return v2.Compose(preprocess)
-    return v2.Compose(preprocess + [augmentations[augmentation_type]])
+    return torch.jit.script(augmentations[augmentation_type])
 
 
-def get_datasets(dataset_name, classes, train_transforms, val_transforms):
-    dataset_path = DATASETS_PATH / dataset_name
-    class_names = [c for c in classes]
-    training_data = SelectiveImageFolder(dataset_path / "train", transform=train_transforms, classes=class_names)
-    validation_data = SelectiveImageFolder(dataset_path / "val", transform=val_transforms, classes=class_names)
-    test_data = SelectiveImageFolder(dataset_path / "test", transform=val_transforms, classes=class_names)
+def get_datasets(dataset_name, model_size, classes, augmentations):
+    dataset_path = DATASETS_PATH / dataset_name / model_size
+    training_data = SelectiveTensorFolder(dataset_path / "train", transform=augmentations, classes=classes)
+    validation_data = SelectiveTensorFolder(dataset_path / "val", classes=classes)
+    test_data = SelectiveTensorFolder(dataset_path / "test", classes=classes)
     return training_data, validation_data, test_data
 
 
@@ -308,9 +282,8 @@ def train(
         )
         print(f"Training {writer.log_dir}")
         print("-------------------------------")
-    train_transform = get_transforms(augmentation_type, model_size)
-    val_transform = get_transforms(AUGMENTATION_NONE, model_size)
-    training_data, validation_data, test_data = get_datasets(dataset_name, classes, train_transform, val_transform)
+    augmentations = get_augmentations(augmentation_type)
+    training_data, validation_data, test_data = get_datasets(dataset_name, model_size, classes, augmentations)
     train_loader, val_loader, test_loader = get_loaders(
         training_data, validation_data, test_data, batch_size, use_weighted_sampling
     )
@@ -363,7 +336,7 @@ def extract_params():
     parser.add_argument("--model", type=str, choices=(CONVNEXT_TINY, CONVNEXT_SMALL, CONVNEXT_BASE, CONVNEXT_LARGE), required=True)
     parser.add_argument("--augmentation-type", type=str, choices=(AUGMENTATION_AUTO, AUGMENTATION_CUSTOM, AUGMENTATION_NONE), required=True)
     parser.add_argument("--num-trainable-layers", type=int, choices=range(0, 50), required=True)
-    parser.add_argument("--use-weighted-sampling", type=bool, required=True)
+    parser.add_argument("--use-weighted-sampling", type=lambda x: bool(int(x)), choices=(0, 1), required=True)
     parser.add_argument("--learning-rate", type=float, required=True)
     return parser.parse_args()
 
@@ -371,7 +344,7 @@ def extract_params():
 if __name__ == "__main__":
     args = extract_params()
     train(
-        dataset_name='dataset',
+        dataset_name=DATASET_NAME,
         classes=CLASSES,
         model_size=args.model,
         augmentation_type=args.augmentation_type,
