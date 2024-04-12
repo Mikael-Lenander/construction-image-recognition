@@ -60,7 +60,7 @@ class SelectiveTensorFolder(DatasetFolder):
 def get_augmentations(augmentation_type):
     augmentations = {
         AUGMENTATION_AUTO: v2.TrivialAugmentWide(),
-        AUGMENTATION_CUSTOM: v2.RandomApply(
+        AUGMENTATION_CUSTOM: torch.jit.script(v2.RandomApply(
             nn.ModuleList(
                 [
                     v2.RandomHorizontalFlip(p=0.5),
@@ -86,10 +86,10 @@ def get_augmentations(augmentation_type):
                 ]
             ),
             p=0.5,
-        ),
+        )),
         AUGMENTATION_NONE: nn.Identity(),
     }
-    return torch.jit.script(augmentations[augmentation_type])
+    return augmentations[augmentation_type]
 
 
 def get_datasets(dataset_name, model_size, classes, augmentations):
