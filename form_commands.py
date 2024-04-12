@@ -7,7 +7,7 @@ TRAIN_FILE = 'train_model.py'
 options = {
     '--model': ("convnext_tiny", "convnext_small", "convnext_base"),
     '--augmentation-type': ("auto", "custom", "none"),
-    '--num-trainable-layers': (0, 3, 5, 10),
+    '--num-trainable-layers': (0, 1, 2, 3, 5),
     '--use-weighted-sampling': (0, 1),
     '--learning-rate': (0.001, 0.0008, 0.0005),
 }
