@@ -1,10 +1,3 @@
-# Ohjeet
+# Construction image recognition model
 
-Pura dataset-processed.zip. Lisää kansion sijainti tiedoston train_model.py muuttujaan `DATASETS_PATH`. Tiedostorakenteen pitäisi olla nyt:
-
-{DATASETS_PATH}/dataset-processed/  
-----convnext_base/   
-----convnext_small/  
-----convnext_tiny/  
-
-Aja komennot tiedostosta commands.txt.
+A machine learning model for classifying road construction images to six working stages: gravel, asphalt, excavation, sewer-pipe, cabels, geotextile. The model is based on a convolutional neural network (CNN) and is trained on a dataset of 3,000 images. The base model is a pre-trained [ConvNeXt](https://openaccess.thecvf.com/content/CVPR2022/html/Liu_A_ConvNet_for_the_2020s_CVPR_2022_paper.html) model, which is fine-tuned on the construction images. The following hyperparameters are optimized with a grid search: model size, data augmentation, number of trainable layers, (whether to use) [weighted sampling](https://pytorch.org/docs/stable/data.html#torch.utils.data.WeightedRandomSampler) and learning rate.
